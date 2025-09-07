@@ -1,4 +1,4 @@
-const CACHE='prip-navip-v5';
+const CACHE='prip-navip-v7';
 const ASSETS=['./','./index.html','./manifest.webmanifest',
 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];

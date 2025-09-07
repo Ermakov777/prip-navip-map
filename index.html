@@ -14,47 +14,94 @@
 
   <style>
     html,body,#map{height:100%;margin:0}
-    .panel{position:absolute;z-index:1000;top:8px;left:8px;right:8px;max-width:980px;
-           background:#fff;padding:8px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.25)}
-    textarea{width:100%;height:120px}
-    button{padding:8px 12px;margin-right:6px}
+    button{padding:8px 12px}
     .muted{color:#666;font-size:.9em}
     .label{background:#0b5fff;color:#fff;padding:2px 6px;border-radius:6px;
            font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;white-space:nowrap;
            box-shadow:0 1px 4px rgba(0,0,0,.3)}
-    .legend{position:absolute;z-index:1000;bottom:10px;left:10px;background:#fff;padding:6px 8px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.25);font:12px system-ui}
+    .legend{position:absolute;z-index:900;bottom:10px;left:10px;background:#fff;padding:6px 8px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.25);font:12px system-ui}
     .bullet{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
-    #list{position:absolute;z-index:1000;bottom:10px;right:10px;max-width:380px; background:#fff;padding:8px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.25);font:12px/1.3 system-ui}
-    #list .item{border-bottom:1px solid #eee;padding:6px 0}
-    #list .item:last-child{border-bottom:none}
-    #list .title{font-weight:600}
-    #list button{margin-top:4px}
-    /* панель координат */
+
+    /* Правый сайдбар со списком */
+    #drawerToggle{position:absolute;z-index:1100;top:50%;right:10px;transform:translateY(-50%);
+      background:#0b5fff;color:#fff;border:none;border-radius:18px;padding:10px 12px;box-shadow:0 2px 10px rgba(0,0,0,.3)}
+    #drawer{position:absolute;z-index:1050;top:0;right:-360px;width:360px;max-width:85vw;height:100%;
+      background:#fff;box-shadow:-4px 0 16px rgba(0,0,0,.25);transition:right .25s ease;
+      display:flex;flex-direction:column;}
+    #drawer.open{right:0}
+    #drawer header{padding:10px 12px;border-bottom:1px solid #eee;display:flex;gap:8px;align-items:center}
+    #drawer header .tab{padding:6px 10px;border-radius:8px;cursor:pointer}
+    #drawer header .tab.active{background:#0b5fff;color:#fff}
+    #drawer .content{padding:10px 12px;overflow:auto;flex:1}
+    .item{border-bottom:1px solid #eee;padding:8px 0}
+    .item:last-child{border-bottom:none}
+    .title{font-weight:600}
+    .badge{display:inline-block;padding:2px 6px;border-radius:6px;margin-left:6px;font-size:11px}
+    .badge.green{background:#e5f7e9;color:#117a2d}
+    .badge.gray{background:#eee;color:#444}
+    .list-btns{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+    .list-btns button{padding:6px 8px}
+
+    /* Левый сайдбар — ВВОД ПРИПов */
+    #leftToggle{position:absolute;z-index:1100;top:50%;left:10px;transform:translateY(-50%);
+      background:#0b5fff;color:#fff;border:none;border-radius:18px;padding:10px 12px;box-shadow:0 2px 10px rgba(0,0,0,.3)}
+    #leftDrawer{position:absolute;z-index:1050;top:0;left:-380px;width:380px;max-width:88vw;height:100%;
+      background:#fff;box-shadow:4px 0 16px rgba(0,0,0,.25);transition:left .25s ease;
+      display:flex;flex-direction:column;}
+    #leftDrawer.open{left:0}
+    #leftDrawer header{padding:12px;border-bottom:1px solid #eee;font-weight:600}
+    #leftDrawer .content{padding:12px;overflow:auto;flex:1}
+    #leftDrawer textarea{width:100%;height:160px}
+    #leftDrawer .row{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+    /* панель координат + перекрестие */
     #coords{position:absolute;z-index:1000;bottom:10px;left:50%;transform:translateX(-50%);
             background:#000;color:#fff;padding:6px 10px;border-radius:8px;opacity:.85;
             font:12px/1.2 system-ui,Segoe UI,Roboto,Arial;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+    #crosshair{position:absolute;z-index:800;top:50%;left:50%;width:40px;height:40px;margin-left:-20px;margin-top:-20px;
+      pointer-events:none;opacity:.5}
+    #crosshair:before, #crosshair:after{content:'';position:absolute;background:#666}
+    #crosshair:before{left:50%;top:0;bottom:0;width:1.5px;transform:translateX(-50%)}
+    #crosshair:after{top:50%;left:0;right:0;height:1.5px;transform:translateY(-50%)}
   </style>
 </head>
 <body>
 <div id="map"></div>
+<div id="crosshair"></div>
 
-<div class="panel">
-  <b>Вставьте ПРИП/НАВИП (UTC):</b>
-  <textarea id="inp" placeholder="Примеры форматов времени: 181900 ПО 202100 АВГ  |  12 13 АВГ 0800 ДО 0900"></textarea>
-  <div style="margin-top:6px">
-    <button id="paste">Вставить из буфера</button>
-    <button id="add">Добавить на карту</button>
-    <button id="clear">Очистить всё</button>
-    <span id="status" class="muted">ожидаю ввод…</span>
+<!-- Левый сайдбар: Ввод ПРИПов -->
+<button id="leftToggle">Ввод</button>
+<div id="leftDrawer">
+  <header>Вставьте ПРИП/НАВИП (UTC)</header>
+  <div class="content">
+    <textarea id="inp" placeholder="Примеры форматов времени: 181900 ПО 202100 АВГ  |  12 13 АВГ 0800 ДО 0900"></textarea>
+    <div class="row">
+      <button id="paste">Вставить из буфера</button>
+      <button id="add">Добавить на карту</button>
+      <button id="clear">Очистить всё</button>
+      <span id="status" class="muted">ожидаю ввод…</span>
+    </div>
   </div>
 </div>
 
+<!-- Правый сайдбар: Список -->
+<button id="drawerToggle">Список</button>
+<div id="drawer">
+  <header>
+    <div class="tab active" data-tab="taganrog">Таганрог</div>
+    <div class="tab" data-tab="novorossiysk">Новороссийск</div>
+  </header>
+  <div class="content">
+    <div id="list-taganrog"></div>
+    <div id="list-novorossiysk" style="display:none"></div>
+  </div>
+</div>
+
+<!-- Легенда и координаты -->
 <div class="legend">
   <div><span class="bullet" style="background:#d33"></span>Активно (по МСК)</div>
   <div><span class="bullet" style="background:#999"></span>Неактивно (по МСК)</div>
 </div>
-
-<div id="list"></div>
 <div id="coords">—</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -65,17 +112,14 @@
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'© OpenStreetMap'}).addTo(map);
   L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:.8}).addTo(map);
 
-  // ===== утилиты времени
-  const MSK_OFFSET_HOURS = 3; // UTC+3
+  const MSK_OFFSET_HOURS = 3;
   function toMSK(dateUtc){ return new Date(dateUtc.getTime() + MSK_OFFSET_HOURS*3600*1000); }
   function nowMSK(){ return toMSK(new Date()); }
 
-  // ===== хранение объектов
   const storeKey = 'pripNavipObjects';
-  let objects = JSON.parse(localStorage.getItem(storeKey) || '[]'); // [{id,text,pts,meta,startUtc,endUtc}]
-  const layers = new Map(); // id -> {geom,label}
+  let objects = JSON.parse(localStorage.getItem(storeKey) || '[]');
+  const layers = new Map();
 
-  // ===== нормализация, метаданные
   function norm(s){
     return s.replace(/[°º]/g,'-').replace(/[′’]/g,'-').replace(/[″]/g,'-')
       .replace(/[–—]/g,'-').replace(/,/g,'.').replace(/\s+/g,' ')
@@ -89,24 +133,27 @@
     const short = firstLine.slice(0, 80);
     return { number: num, short, full: raw.trim() };
   }
+  function detectPort(raw){
+    const t = norm(raw);
+    if (/ПРИП\s+НОВОРОССИЙСК/.test(t)) return 'novorossiysk';
+    if (/ПРИП\s+ТАГАНРОГ/.test(t)) return 'taganrog';
+    return 'other';
+  }
 
-  // ===== парсер времени UTC → ISO (2 формата)
   const MONTHS = {ЯНВ:0,ФЕВ:1,МАР:2,АПР:3,МАЙ:4,ИЮН:5,ИЮЛ:6,АВГ:7,СЕН:8,ОКТ:9,НОЯ:10,ДЕК:11};
   function parseTimeWindow(raw){
     const t = norm(raw);
-    // A: 181900 ПО 202100 АВГ
     let m = t.match(/(\d{2})(\d{2})(\d{2})\s*(?:-|ПО|TO|DO)\s*(\d{2})(\d{2})(\d{2})\s*(ЯНВ|ФЕВ|МАР|АПР|МАЙ|ИЮН|ИЮЛ|АВГ|СЕН|ОКТ|НОЯ|ДЕК)/);
     if (m){
       const sd=+m[1], sh=+m[2], sm=+m[3];
       const ed=+m[4], eh=+m[5], em=+m[6];
       const month = MONTHS[m[7]];
       const now = nowMSK(); let year = now.getFullYear();
-      if (now.getMonth() === 0 && month === 11) year--; 
+      if (now.getMonth() === 0 && month === 11) year--;
       const startUtc = new Date(Date.UTC(year, month, sd, sh, sm, 0));
       const endUtc   = new Date(Date.UTC(year, month, ed, eh, em, 0));
       return { startUtc: startUtc.toISOString(), endUtc: endUtc.toISOString() };
     }
-    // B: 12 13 АВГ 0800 ДО 0900 (или 12 АВГ 0800 ДО 0900)
     m = t.match(/(\d{1,2})(?:\s*И\s*(\d{1,2}))?\s*(ЯНВ|ФЕВ|МАР|АПР|МАЙ|ИЮН|ИЮЛ|АВГ|СЕН|ОКТ|НОЯ|ДЕК)\s*(\d{4})\s*(?:ДО|ПО|TO|DO)\s*(\d{4})/);
     if (m){
       const d1=+m[1], d2=m[2]?+m[2]:null, month = MONTHS[m[3]];
@@ -121,7 +168,6 @@
     return null;
   }
 
-  // ===== парсер координат (DMM и DMS)
   function parseCoords(raw){
     const t = norm(raw);
     const latDMM = /(\d{2})[- ](\d{2}(?:\.\d+)?)\s*([СNЮS])/g;
@@ -197,7 +243,7 @@
       const el = layer.label.getElement(); if (el) el.style.opacity = active ? 1 : 0.6;
       if (layer.geom.isPopupOpen && layer.geom.isPopupOpen()) layer.geom.setPopupContent(popupHtml(obj));
     }
-    renderList();
+    renderLists();
   }
 
   function addFromText(raw){
@@ -209,36 +255,67 @@
       id: Date.now().toString(36) + Math.random().toString(36).slice(2),
       text: raw, pts, meta,
       startUtc: tw ? tw.startUtc : null,
-      endUtc: tw ? tw.endUtc : null
+      endUtc: tw ? tw.endUtc : null,
+      port: detectPort(raw)
     };
     objects.push(obj); save();
     renderObject(obj);
-    renderList();
+    renderLists();
     document.getElementById('status').textContent = 'добавлено';
   }
 
   function removeById(id){
     const layer = layers.get(id);
     if (layer){ map.removeLayer(layer.geom); map.removeLayer(layer.label); layers.delete(id); }
-    objects = objects.filter(o=>o.id!==id); save(); renderList();
+    objects = objects.filter(o=>o.id!==id); save(); renderLists();
   }
   window.deletePrip = removeById;
 
-  function renderList(){
-    const box = document.getElementById('list');
-    if (!objects.length){ box.innerHTML = '<i>Список пуст</i>'; return; }
-    box.innerHTML = objects.map(o=>{
-      const active = isActive(o);
-      const title = (o.meta.number ? 'ПРИП '+o.meta.number : 'ПРИП') + ' — ' + (active?'активен':'неактивен');
-      return `<div class="item">
-        <div class="title">${title}</div>
-        <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.meta.short}</div>
+  function sortByNumber(a,b){
+    const na = a.meta.number ? parseInt(a.meta.number,10) : Infinity;
+    const nb = b.meta.number ? parseInt(b.meta.number,10) : Infinity;
+    return na - nb;
+  }
+  function itemHtml(o){
+    const active = isActive(o);
+    const badge = active ? '<span class="badge green">активен</span>' : '<span class="badge gray">неактивен</span>';
+    const title = (o.meta.number ? 'ПРИП '+o.meta.number : 'ПРИП');
+    return `<div class="item">
+      <div class="title">${title} ${badge}</div>
+      <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.meta.short}</div>
+      <div class="list-btns">
+        <button onclick="(function(){const LAY=layers.get('${o.id}'); if(!LAY) return; const g=LAY.geom; if(g.getBounds){map.fitBounds(g.getBounds(),{padding:[24,24]});} else {map.setView(g.getLatLng(),12);} })()">Показать</button>
         <button onclick="window.deletePrip('${o.id}')">Удалить</button>
-      </div>`;
-    }).join('');
+      </div>
+    </div>`;
+  }
+  function renderLists(){
+    const tag = document.getElementById('list-taganrog');
+    const nvr = document.getElementById('list-novorossiysk');
+    const tagItems = objects.filter(o=>o.port==='taganrog').slice().sort(sortByNumber).map(itemHtml).join('') || '<i>Нет ПРИПов</i>';
+    const nvrItems = objects.filter(o=>o.port==='novorossiysk').slice().sort(sortByNumber).map(itemHtml).join('') || '<i>Нет ПРИПов</i>';
+    tag.innerHTML = tagItems;
+    nvr.innerHTML = nvrItems;
   }
 
-  // ===== ПАНЕЛЬ КООРДИНАТ (DMM + стороны света)
+  // сайдбары
+  const drawer = document.getElementById('drawer');
+  const toggle = document.getElementById('drawerToggle');
+  toggle.onclick = ()=> drawer.classList.toggle('open');
+  document.querySelectorAll('#drawer header .tab').forEach(tab=>{
+    tab.onclick = ()=>{
+      document.querySelectorAll('#drawer header .tab').forEach(t=>t.classList.remove('active'));
+      tab.classList.add('active');
+      const tabId = tab.dataset.tab;
+      document.getElementById('list-taganrog').style.display = tabId==='taganrog' ? '' : 'none';
+      document.getElementById('list-novorossiysk').style.display = tabId==='novorossiysk' ? '' : 'none';
+    };
+  });
+  const leftDrawer = document.getElementById('leftDrawer');
+  const leftToggle = document.getElementById('leftToggle');
+  leftToggle.onclick = ()=> leftDrawer.classList.toggle('open');
+
+  // координаты центра (перекрестие)
   const coordBox = document.getElementById('coords');
   function toDMM(value, isLat, decimals=2){
     const hemi = value>=0 ? (isLat ? 'С' : 'В') : (isLat ? 'Ю' : 'З');
@@ -250,21 +327,20 @@
     return `${degStr}-${minStr}${hemi}`;
   }
   function updateCoordsDisplay(latlng){
-    if (!latlng) return;
     const txt = `${toDMM(latlng.lat, true)}  ${toDMM(latlng.lng, false)}`;
     coordBox.textContent = txt;
   }
-  map.on('mousemove', (e)=> updateCoordsDisplay(e.latlng));
-  // для тач-устройств — показываем координаты центра карты на каждом перемещении
-  map.on('move', ()=> updateCoordsDisplay(map.getCenter()));
-  updateCoordsDisplay(map.getCenter());
+  function syncCenterCoords(){ updateCoordsDisplay(map.getCenter()); }
+  map.on('move', syncCenterCoords);
+  map.on('zoom', syncCenterCoords);
+  syncCenterCoords();
 
-  // восстановление при старте
+  // восстановление
   objects.forEach(renderObject);
-  renderList();
+  renderLists();
   setInterval(rerenderActivity, 30000);
 
-  // кнопки
+  // кнопки ввода
   async function pasteFromClipboard(){
     try{const t=await navigator.clipboard.readText(); if(t) document.getElementById('inp').value=t;}
     catch(e){alert('Нет доступа к буферу. Вставьте вручную.');}
@@ -273,10 +349,9 @@
   document.getElementById('add').onclick = ()=> addFromText(document.getElementById('inp').value||'');
   document.getElementById('clear').onclick = ()=>{
     for (const {geom,label} of layers.values()){ map.removeLayer(geom); map.removeLayer(label); }
-    layers.clear(); objects = []; save(); renderList(); document.getElementById('status').textContent='очищено';
+    layers.clear(); objects = []; localStorage.setItem(storeKey,'[]'); renderLists(); document.getElementById('status').textContent='очищено';
   };
 
-  // PWA SW
   if('serviceWorker' in navigator){
     window.addEventListener('load', ()=>navigator.serviceWorker.register('./sw.js'));
   }
