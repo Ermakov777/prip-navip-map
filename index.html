@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PRIP/NAVIP → карта</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0b5fff">
+  <link rel="icon" href="icon-192.png">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+
+  <style>
+    html,body,#map{height:100%;margin:0}
+    .panel{position:absolute;z-index:1000;top:8px;left:8px;right:8px;max-width:980px;
+           background:#fff;padding:8px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.25)}
+    textarea{width:100%;height:120px}
+    button{padding:8px 12px;margin-right:6px}
+    .muted{color:#666;font-size:.9em}
+    .label{background:#0b5fff;color:#fff;padding:2px 6px;border-radius:6px;
+           font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;white-space:nowrap;
+           box-shadow:0 1px 4px rgba(0,0,0,.3)}
+    .legend{position:absolute;z-index:1000;bottom:10px;left:10px;background:#fff;padding:6px 8px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.25);font:12px system-ui}
+    .bullet{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+    #list{position:absolute;z-index:1000;bottom:10px;right:10px;max-width:380px; background:#fff;padding:8px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.25);font:12px/1.3 system-ui}
+    #list .item{border-bottom:1px solid #eee;padding:6px 0}
+    #list .item:last-child{border-bottom:none}
+    #list .title{font-weight:600}
+    #list button{margin-top:4px}
+    /* панель координат */
+    #coords{position:absolute;z-index:1000;bottom:10px;left:50%;transform:translateX(-50%);
+            background:#000;color:#fff;padding:6px 10px;border-radius:8px;opacity:.85;
+            font:12px/1.2 system-ui,Segoe UI,Roboto,Arial;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="panel">
+  <b>Вставьте ПРИП/НАВИП (UTC):</b>
+  <textarea id="inp" placeholder="Примеры форматов времени: 181900 ПО 202100 АВГ  |  12 13 АВГ 0800 ДО 0900"></textarea>
+  <div style="margin-top:6px">
+    <button id="paste">Вставить из буфера</button>
+    <button id="add">Добавить на карту</button>
+    <button id="clear">Очистить всё</button>
+    <span id="status" class="muted">ожидаю ввод…</span>
+  </div>
+</div>
+
+<div class="legend">
+  <div><span class="bullet" style="background:#d33"></span>Активно (по МСК)</div>
+  <div><span class="bullet" style="background:#999"></span>Неактивно (по МСК)</div>
+</div>
+
+<div id="list"></div>
+<div id="coords">—</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+  // ===== карта
+  const map = L.map('map', { zoomControl: true }).setView([44.6, 37.8], 7);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'© OpenStreetMap'}).addTo(map);
+  L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:.8}).addTo(map);
+
+  // ===== утилиты времени
+  const MSK_OFFSET_HOURS = 3; // UTC+3
+  function toMSK(dateUtc){ return new Date(dateUtc.getTime() + MSK_OFFSET_HOURS*3600*1000); }
+  function nowMSK(){ return toMSK(new Date()); }
+
+  // ===== хранение объектов
+  const storeKey = 'pripNavipObjects';
+  let objects = JSON.parse(localStorage.getItem(storeKey) || '[]'); // [{id,text,pts,meta,startUtc,endUtc}]
+  const layers = new Map(); // id -> {geom,label}
+
+  // ===== нормализация, метаданные
+  function norm(s){
+    return s.replace(/[°º]/g,'-').replace(/[′’]/g,'-').replace(/[″]/g,'-')
+      .replace(/[–—]/g,'-').replace(/,/g,'.').replace(/\s+/g,' ')
+      .trim().toUpperCase();
+  }
+  function extractMeta(raw){
+    const text = raw.replace(/\s+/g,' ').trim();
+    const firstLine = (text.split(/=|\n/)[0] || '').trim();
+    const m = /ПРИП[^0-9]*([0-9]+)/i.exec(firstLine);
+    const num = m ? m[1] : null;
+    const short = firstLine.slice(0, 80);
+    return { number: num, short, full: raw.trim() };
+  }
+
+  // ===== парсер времени UTC → ISO (2 формата)
+  const MONTHS = {ЯНВ:0,ФЕВ:1,МАР:2,АПР:3,МАЙ:4,ИЮН:5,ИЮЛ:6,АВГ:7,СЕН:8,ОКТ:9,НОЯ:10,ДЕК:11};
+  function parseTimeWindow(raw){
+    const t = norm(raw);
+    // A: 181900 ПО 202100 АВГ
+    let m = t.match(/(\d{2})(\d{2})(\d{2})\s*(?:-|ПО|TO|DO)\s*(\d{2})(\d{2})(\d{2})\s*(ЯНВ|ФЕВ|МАР|АПР|МАЙ|ИЮН|ИЮЛ|АВГ|СЕН|ОКТ|НОЯ|ДЕК)/);
+    if (m){
+      const sd=+m[1], sh=+m[2], sm=+m[3];
+      const ed=+m[4], eh=+m[5], em=+m[6];
+      const month = MONTHS[m[7]];
+      const now = nowMSK(); let year = now.getFullYear();
+      if (now.getMonth() === 0 && month === 11) year--; 
+      const startUtc = new Date(Date.UTC(year, month, sd, sh, sm, 0));
+      const endUtc   = new Date(Date.UTC(year, month, ed, eh, em, 0));
+      return { startUtc: startUtc.toISOString(), endUtc: endUtc.toISOString() };
+    }
+    // B: 12 13 АВГ 0800 ДО 0900 (или 12 АВГ 0800 ДО 0900)
+    m = t.match(/(\d{1,2})(?:\s*И\s*(\d{1,2}))?\s*(ЯНВ|ФЕВ|МАР|АПР|МАЙ|ИЮН|ИЮЛ|АВГ|СЕН|ОКТ|НОЯ|ДЕК)\s*(\d{4})\s*(?:ДО|ПО|TO|DO)\s*(\d{4})/);
+    if (m){
+      const d1=+m[1], d2=m[2]?+m[2]:null, month = MONTHS[m[3]];
+      const startHH = +m[4].slice(0,2), startMM = +m[4].slice(2,4);
+      const endHH   = +m[5].slice(0,2), endMM   = +m[5].slice(2,4);
+      const now = nowMSK(); let year = now.getFullYear();
+      if (now.getMonth() === 0 && month === 11) year--;
+      const startUtc = new Date(Date.UTC(year, month, d1, startHH, startMM, 0));
+      const endUtc   = new Date(Date.UTC(year, month, (d2??d1), endHH, endMM, 0));
+      return { startUtc: startUtc.toISOString(), endUtc: endUtc.toISOString() };
+    }
+    return null;
+  }
+
+  // ===== парсер координат (DMM и DMS)
+  function parseCoords(raw){
+    const t = norm(raw);
+    const latDMM = /(\d{2})[- ](\d{2}(?:\.\d+)?)\s*([СNЮS])/g;
+    const latDMS = /(\d{2})[- ](\d{2})[- ](\d{2}(?:\.\d+)?)\s*([СNЮS])/g;
+    const lonDMM = /(\d{3})[- ](\d{2}(?:\.\d+)?)\s*([ВEЗW])/g;
+    const lonDMS = /(\d{3})[- ](\d{2})[- ](\d{2}(?:\.\d+)?)\s*([ВEЗW])/g;
+    const latMatches = [...t.matchAll(latDMS)].map(m=>({type:'DMS',d:+m[1],m:+m[2],s:+m[3],hemi:m[4],idx:m.index}))
+      .concat([...t.matchAll(latDMM)].map(m=>({type:'DMM',d:+m[1],m:+m[2],s:0,hemi:m[3],idx:m.index}))).sort((a,b)=>a.idx-b.idx);
+    const lonMatches = [...t.matchAll(lonDMS)].map(m=>({type:'DMS',d:+m[1],m:+m[2],s:+m[3],hemi:m[4],idx:m.index}))
+      .concat([...t.matchAll(lonDMM)].map(m=>({type:'DMM',d:+m[1],m:+m[2],s:0,hemi:m[3],idx:m.index}))).sort((a,b)=>a.idx-b.idx);
+    const n = Math.min(latMatches.length, lonMatches.length);
+    const pts = [];
+    for(let i=0;i<n;i++){
+      const A = latMatches[i], B = lonMatches[i];
+      const lat = (A.type==='DMS' ? A.d + A.m/60 + A.s/3600 : A.d + A.m/60) * ((/Ю|S/i.test(A.hemi))?-1:1);
+      const lon = (B.type==='DMS' ? B.d + B.m/60 + B.s/3600 : B.d + B.m/60) * ((/З|W/i.test(B.hemi))?-1:1);
+      if (lat>=-90 && lat<=90 && lon>=-180 && lon<=180) pts.push([lat,lon]);
+    }
+    if(pts.length>=3){const a=pts[0], b=pts[pts.length-1];if(a[0]!==b[0]||a[1]!==b[1])pts.push(a);}
+    return pts;
+  }
+
+  function makeLabel(text){ return L.divIcon({ className:'label', html:text }); }
+  function colorFor(active){ return active ? '#d33' : '#999'; }
+  function applyLayerStyle(layer, active){
+    if (layer.setStyle){
+      layer.setStyle({ color: colorFor(active), fillOpacity: active ? 0.25 : 0.15 });
+    } else if (layer.getElement){ const el = layer.getElement(); if (el) el.style.opacity = active ? 1 : 0.6; }
+  }
+  function isActive(obj){
+    if (!obj.startUtc || !obj.endUtc) return true;
+    const now = nowMSK().getTime();
+    const start = toMSK(new Date(obj.startUtc)).getTime();
+    const end   = toMSK(new Date(obj.endUtc)).getTime();
+    return now >= start && now <= end;
+  }
+  function save(){ localStorage.setItem(storeKey, JSON.stringify(objects)); }
+
+  function popupHtml(obj){
+    const active = isActive(obj);
+    const status = active ? 'АКТИВЕН (МСК)' : 'НЕАКТИВЕН (МСК)';
+    return `<div style="max-width:280px">
+      <div style="margin-bottom:6px"><b>${obj.meta.number ? ('ПРИП '+obj.meta.number) : 'ПРИП'}</b> — ${status}</div>
+      <div style="white-space:pre-wrap;font-size:12px">${obj.meta.full.replace(/[&<>]/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[s]))}</div>
+      <div style="margin-top:8px"><button onclick="window.deletePrip('${obj.id}')">Удалить</button>${active?'': '<button style="margin-left:6px" onclick="window.deletePrip(\''+obj.id+'\')">Удалить (устарел)</button>'}</div>
+    </div>`;
+  }
+
+  function renderObject(obj){
+    const active = isActive(obj);
+    let geom, label;
+    if (obj.pts.length === 1){
+      geom = L.marker(obj.pts[0]).addTo(map).bindPopup(popupHtml(obj));
+      label = L.marker(obj.pts[0], { icon: makeLabel(obj.meta.number ? `ПРИП ${obj.meta.number}` : obj.meta.short) }).addTo(map);
+    } else if (obj.pts.length === 2){
+      geom = L.polyline(obj.pts, {weight:3, color: colorFor(active)}).addTo(map).bindPopup(popupHtml(obj));
+      const mid = [(obj.pts[0][0]+obj.pts[1][0])/2, (obj.pts[0][1]+obj.pts[1][1])/2];
+      label = L.marker(mid, { icon: makeLabel(obj.meta.number ? `ПРИП ${obj.meta.number}` : obj.meta.short) }).addTo(map);
+    } else {
+      geom = L.polygon(obj.pts, {weight:2, color: colorFor(active), fillOpacity: active ? 0.25 : 0.15}).addTo(map).bindPopup(popupHtml(obj));
+      label = L.marker(geom.getBounds().getCenter(), { icon: makeLabel(obj.meta.number ? `ПРИП ${obj.meta.number}` : obj.meta.short) }).addTo(map);
+    }
+    applyLayerStyle(geom, active);
+    layers.set(obj.id, {geom, label});
+  }
+
+  function rerenderActivity(){
+    for (const obj of objects){
+      const layer = layers.get(obj.id);
+      if (!layer) continue;
+      const active = isActive(obj);
+      applyLayerStyle(layer.geom, active);
+      const el = layer.label.getElement(); if (el) el.style.opacity = active ? 1 : 0.6;
+      if (layer.geom.isPopupOpen && layer.geom.isPopupOpen()) layer.geom.setPopupContent(popupHtml(obj));
+    }
+    renderList();
+  }
+
+  function addFromText(raw){
+    const pts = parseCoords(raw);
+    if (!pts.length) { document.getElementById('status').textContent = 'координаты не найдены'; return; }
+    const meta = extractMeta(raw);
+    const tw = parseTimeWindow(raw);
+    const obj = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+      text: raw, pts, meta,
+      startUtc: tw ? tw.startUtc : null,
+      endUtc: tw ? tw.endUtc : null
+    };
+    objects.push(obj); save();
+    renderObject(obj);
+    renderList();
+    document.getElementById('status').textContent = 'добавлено';
+  }
+
+  function removeById(id){
+    const layer = layers.get(id);
+    if (layer){ map.removeLayer(layer.geom); map.removeLayer(layer.label); layers.delete(id); }
+    objects = objects.filter(o=>o.id!==id); save(); renderList();
+  }
+  window.deletePrip = removeById;
+
+  function renderList(){
+    const box = document.getElementById('list');
+    if (!objects.length){ box.innerHTML = '<i>Список пуст</i>'; return; }
+    box.innerHTML = objects.map(o=>{
+      const active = isActive(o);
+      const title = (o.meta.number ? 'ПРИП '+o.meta.number : 'ПРИП') + ' — ' + (active?'активен':'неактивен');
+      return `<div class="item">
+        <div class="title">${title}</div>
+        <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.meta.short}</div>
+        <button onclick="window.deletePrip('${o.id}')">Удалить</button>
+      </div>`;
+    }).join('');
+  }
+
+  // ===== ПАНЕЛЬ КООРДИНАТ (DMM + стороны света)
+  const coordBox = document.getElementById('coords');
+  function toDMM(value, isLat, decimals=2){
+    const hemi = value>=0 ? (isLat ? 'С' : 'В') : (isLat ? 'Ю' : 'З');
+    const abs = Math.abs(value);
+    const deg = Math.floor(abs);
+    const min = (abs - deg) * 60;
+    const minStr = min.toFixed(decimals).padStart(2 + (decimals?decimals+1:0), '0');
+    const degStr = isLat ? String(deg).padStart(2,'0') : String(deg).padStart(3,'0');
+    return `${degStr}-${minStr}${hemi}`;
+  }
+  function updateCoordsDisplay(latlng){
+    if (!latlng) return;
+    const txt = `${toDMM(latlng.lat, true)}  ${toDMM(latlng.lng, false)}`;
+    coordBox.textContent = txt;
+  }
+  map.on('mousemove', (e)=> updateCoordsDisplay(e.latlng));
+  // для тач-устройств — показываем координаты центра карты на каждом перемещении
+  map.on('move', ()=> updateCoordsDisplay(map.getCenter()));
+  updateCoordsDisplay(map.getCenter());
+
+  // восстановление при старте
+  objects.forEach(renderObject);
+  renderList();
+  setInterval(rerenderActivity, 30000);
+
+  // кнопки
+  async function pasteFromClipboard(){
+    try{const t=await navigator.clipboard.readText(); if(t) document.getElementById('inp').value=t;}
+    catch(e){alert('Нет доступа к буферу. Вставьте вручную.');}
+  }
+  document.getElementById('paste').onclick = pasteFromClipboard;
+  document.getElementById('add').onclick = ()=> addFromText(document.getElementById('inp').value||'');
+  document.getElementById('clear').onclick = ()=>{
+    for (const {geom,label} of layers.values()){ map.removeLayer(geom); map.removeLayer(label); }
+    layers.clear(); objects = []; save(); renderList(); document.getElementById('status').textContent='очищено';
+  };
+
+  // PWA SW
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', ()=>navigator.serviceWorker.register('./sw.js'));
+  }
+</script>
+</body>
+</html>
