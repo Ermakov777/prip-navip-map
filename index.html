@@ -1,6 +1,4 @@
-import zipfile
-
-code = """<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -64,7 +62,3 @@ code = """<!DOCTYPE html>
   </script>
 </body>
 </html>
-"""
-
-with zipfile.ZipFile("/mnt/data/prip-navip-map-index.zip", "w") as z:
-    z.writestr("index.html", code)
