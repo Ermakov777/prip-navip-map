@@ -1,37 +1,70 @@
-<script>
-  // URL твоего Cloudflare Worker
-  const CHECK_URL = "https://11.ermakovnd88.workers.dev/check-telegram";
+import zipfile
 
-  async function loginWithTelegram(initData) {
-    try {
-      const res = await fetch(CHECK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData }),
-      });
+code = """<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>ПРИП/НАВИП – карта</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body { margin: 0; padding: 0; }
+    #map { height: 100vh; width: 100vw; }
+    .is-admin #map { border: 4px solid red; }
+    .is-user #map { border: 4px solid green; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
 
-      if (!res.ok) {
-        throw new Error("Ошибка проверки");
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    // URL твоего Cloudflare Worker
+    const CHECK_URL = "https://11.ermakovnd88.workers.dev/check-telegram";
+
+    async function loginWithTelegram(initData) {
+      try {
+        const res = await fetch(CHECK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData }),
+        });
+
+        if (!res.ok) {
+          throw new Error("Ошибка проверки");
+        }
+
+        const data = await res.json();
+
+        if (data.role === "admin") {
+          alert("Добро пожаловать, админ!");
+          document.body.classList.add("is-admin");
+        } else {
+          alert("Вход как пользователь");
+          document.body.classList.add("is-user");
+        }
+      } catch (err) {
+        alert("Сетевая ошибка проверки: " + err.message);
       }
-
-      const data = await res.json();
-
-      if (data.role === "admin") {
-        alert("Добро пожаловать, админ!");
-        document.body.classList.add("is-admin");
-      } else {
-        alert("Вход как пользователь");
-        document.body.classList.add("is-user");
-      }
-    } catch (err) {
-      alert("Сетевая ошибка проверки: " + err.message);
     }
-  }
 
-  // Инициализация Telegram WebApp
-  window.Telegram.WebApp.ready();
-  const initData = window.Telegram.WebApp.initData;
-  if (initData) {
-    loginWithTelegram(initData);
-  }
-</script>
+    // Инициализация Telegram WebApp
+    window.Telegram.WebApp.ready();
+    const initData = window.Telegram.WebApp.initData;
+    if (initData) {
+      loginWithTelegram(initData);
+    }
+
+    // Карта
+    const map = L.map("map").setView([44.6, 33.5], 6);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+  </script>
+</body>
+</html>
+"""
+
+with zipfile.ZipFile("/mnt/data/prip-navip-map-index.zip", "w") as z:
+    z.writestr("index.html", code)
