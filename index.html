@@ -1,64 +1,114 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PRIP/NAVIP – карта</title>
-  <link rel="manifest" href="manifest.webmanifest">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PRIP/NAVIP Mini App</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
   <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      width: 100%;
-    }
-    #map {
-      height: 100%;
-      width: 100%;
-    }
-    .tg-login {
-      position: fixed;
-      top: 10px;
-      left: 10px;
-      z-index: 10000;
-      background: rgba(255,255,255,.95);
-      padding: 6px 8px;
-      border-radius: 10px;
-      box-shadow: 0 4px 14px rgba(0,0,0,.15);
-    }
-    .premium-only { display: none; }
-    body.subscribed .premium-only { display: block; }
+    html,body,#map{height:100%;margin:0}
+    .topbar{position:fixed;top:0;left:0;right:0;height:44px;display:flex;align-items:center;gap:8px;padding:0 10px;background:rgba(0,0,0,.06);backdrop-filter:saturate(180%) blur(8px);z-index:2}
+    .spacer{flex:1}
+    .badge{font:600 12px system-ui;padding:4px 8px;border-radius:999px;background:#eee}
+    .admin-only{display:none}
+    body.is-admin .admin-only{display:inline-block}
+    .crosshair{position:absolute;left:50%;top:50%;width:16px;height:16px;margin-left:-8px;margin-top:-8px;border:1px solid rgba(0,0,0,.5);border-radius:50%;box-shadow:0 0 0 1px rgba(255,255,255,.9) inset;z-index:2;pointer-events:none}
   </style>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 </head>
 <body>
-  <!-- Карта -->
-  <div id="map"></div>
-
-  <!-- Telegram Login -->
-  <div id="tg-login-floating" class="tg-login">
-    <script async src="https://telegram.org/js/telegram-widget.js?22"
-            data-telegram-login="Korsarprip_bot"
-            data-size="medium"
-            data-onauth="onTelegramAuth(user)"
-            data-request-access="write"></script>
+  <div class="topbar">
+    <div id="user" class="badge">…</div>
+    <div id="role" class="badge">…</div>
+    <div class="spacer"></div>
+    <button id="btnAdd" class="badge admin-only">+ ПРИП (центр)</button>
+    <button id="buy" class="badge">Оплатить Stars</button>
   </div>
+  <div id="map"></div>
+  <div class="crosshair"></div>
 
-  <!-- Leaflet -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <!-- Telegram Auth -->
-  <script src="./tg-auth.js"></script>
-
   <script>
-    // Инициализация карты
-    const map = L.map('map').setView([44.63, 37.9], 6);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap'
-    }).addTo(map);
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
+    document.body.style.background = tg.backgroundColor || '#fff';
 
-    // Тестовый маркер (чтоб было видно, что карта работает)
-    L.marker([44.63, 37.9]).addTo(map).bindPopup("Привет! Тут работает карта.");
+    const initData = tg.initData || "";
+    const initDataUnsafe = tg.initDataUnsafe || {};
+    const user = initDataUnsafe.user || null;
+
+    const CHECK_URL = "https://11.ermakovnd88.workers.dev/check-telegram";
+    const API_URL = "https://11.ermakovnd88.workers.dev"; // /global-prips
+
+    let ROLE = "user";
+    user && (document.getElementById('user').textContent = '@' + (user.username ?? user.id));
+
+    async function verify() {
+      const res = await fetch(CHECK_URL, {
+        method: "POST",
+        headers: {"content-type":"application/json"},
+        body: JSON.stringify({ initData })
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j.error || "verify failed");
+      ROLE = j.role;
+      document.getElementById('role').textContent = ROLE;
+      document.body.classList.toggle('is-admin', ROLE === 'admin');
+      document.body.classList.toggle('is-user', ROLE === 'user');
+    }
+
+    // Leaflet map
+    const map = L.map('map').setView([44.63, 37.9], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+
+    const layerGroup = L.layerGroup().addTo(map);
+
+    async function loadGlobal(){
+      const res = await fetch(API_URL + "/global-prips", {
+        headers: { "x-init-data": initData }
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j.error || "load failed");
+      layerGroup.clearLayers();
+      (j.features || []).forEach(f => {
+        if (f.geometry?.type === "Point") {
+          const [lon, lat] = f.geometry.coordinates;
+          L.marker([lat, lon]).addTo(layerGroup).bindPopup(f.properties?.title || "PRIP");
+        } else if (f.geometry?.type === "Polygon") {
+          const latlngs = f.geometry.coordinates[0].map(([lon,lat]) => [lat,lon]);
+          L.polygon(latlngs, { color: 'red' }).addTo(layerGroup).bindPopup(f.properties?.title || "PRIP");
+        }
+      });
+    }
+
+    document.getElementById('btnAdd').onclick = async () => {
+      // Демка: добавить точку в центр карты
+      const center = map.getCenter();
+      const feature = {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [center.lng, center.lat] },
+        properties: { title: "Demo PRIP @ " + new Date().toISOString() }
+      };
+      const res = await fetch(API_URL + "/global-prips", {
+        method: "POST",
+        headers: { "content-type":"application/json", "x-init-data": initData },
+        body: JSON.stringify({ feature })
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) { tg.showAlert("Ошибка сохранения: " + (j.error || res.status)); return; }
+      tg.showAlert("Сохранено");
+      loadGlobal();
+    };
+
+    document.getElementById('buy').onclick = () => {
+      tg.openTelegramLink("https://t.me/Korsarprip_bot?start=buy_month");
+    };
+
+    tg.BackButton.show();
+    tg.BackButton.onClick(() => tg.close());
+
+    verify().then(loadGlobal).catch(err => tg.showAlert("Ошибка проверки: " + err.message));
   </script>
 </body>
 </html>
